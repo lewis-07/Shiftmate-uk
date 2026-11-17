@@ -1,0 +1,226 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0b1220">
+<title>ShiftMate UK</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0b1220;color:#f5f7fb;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+main{max-width:650px;margin:auto;padding:22px 15px 45px}
+h1{font-size:28px;margin-bottom:5px}
+h2{font-size:19px;margin-top:26px}
+.muted{color:#a9b7ca;font-size:13px}
+.brand{font-size:25px;font-weight:850;margin-bottom:25px}
+.brand span,.green{color:#39d6a0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:20px 0}
+.card{background:#142033;border:1px solid #2b3b52;border-radius:16px;padding:15px;margin:12px 0}
+.metric{font-size:12px;color:#a9b7ca}
+.value{font-size:24px;font-weight:800;margin-top:7px}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.field{min-width:0}
+.full{grid-column:1/-1}
+label{display:block;color:#a9b7ca;font-size:12px;margin-bottom:6px}
+input{width:100%;padding:12px;background:#0b1525;color:white;border:1px solid #2b3b52;border-radius:10px;font-size:16px}
+button{padding:13px;border:0;border-radius:11px;font-weight:bold;font-size:14px;cursor:pointer}
+.primary{background:#39d6a0;color:#062218;width:100%}
+.secondary{background:#26364c;color:white;flex:1}
+.delete{background:#48232c;color:#ffc0c0;padding:8px}
+.actions{display:flex;gap:10px;margin-top:12px}
+.row{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.shift{padding:13px 0;border-bottom:1px solid #2b3b52}
+.shift:last-child{border:0}
+.right{text-align:right;white-space:nowrap;font-weight:bold}
+.status{font-size:12px;color:#39d6a0;margin-top:9px;min-height:18px}
+.empty{text-align:center;padding:20px;color:#a9b7ca}
+</style>
+</head>
+<body>
+<main>
+<div class="brand">Shift<span>Mate</span> UK</div>
+<h1>Your shifts. Your money.</h1>
+<p class="muted">Track your hours and earnings in one place.</p>
+
+<div class="grid">
+ <div class="card"><div class="metric">THIS MONTH'S GROSS</div><div class="value green" id="monthPay">£0.00</div></div>
+ <div class="card"><div class="metric">HOURS THIS MONTH</div><div class="value" id="monthHours">0.0</div></div>
+ <div class="card"><div class="metric">SHIFTS SAVED</div><div class="value" id="shiftCount">0</div></div>
+ <div class="card"><div class="metric">ALL-TIME GROSS</div><div class="value" id="allPay">£0.00</div></div>
+</div>
+
+<h2>Add a shift</h2>
+<div class="card">
+<form id="shiftForm">
+<div class="formgrid">
+ <div class="field"><label>Date</label><input id="date" type="date" required></div>
+ <div class="field"><label>Hourly rate (£)</label><input id="rate" type="number" min="0.01" step="0.01" placeholder="12.21" required></div>
+ <div class="field"><label>Start</label><input id="start" type="time" value="09:00" required></div>
+ <div class="field"><label>Finish</label><input id="end" type="time" value="17:00" required></div>
+ <div class="field"><label>Unpaid break (mins)</label><input id="breakMins" type="number" min="0" value="30" required></div>
+ <div class="field"><label>Employer</label><input id="job" maxlength="40" placeholder="Optional"></div>
+ <div class="field full"><label>Notes</label><input id="notes" maxlength="100" placeholder="Optional"></div>
+ <div class="field full"><button class="primary" type="submit">＋ Save shift</button><div id="status" class="status"></div></div>
+</div>
+</form>
+</div>
+
+<div class="row"><h2>Shift history</h2><span class="muted" id="historyCount">0 shifts</span></div>
+<div class="card" id="history"><div class="empty">No shifts saved yet.</div></div>
+
+<h2>Back up your shifts</h2>
+<div class="card">
+<p class="muted">Your shifts are saved in this browser on this device. Export a backup before changing devices or clearing browser data.</p>
+<div class="actions">
+<button class="secondary" id="exportBtn" type="button">Export backup</button>
+<button class="secondary" id="importBtn" type="button">Import backup</button>
+</div>
+<input id="importFile" type="file" accept=".json,application/json" hidden>
+<div class="status" id="storageStatus">Checking storage…</div>
+</div>
+<p class="muted">Gross-pay estimates only. Tax, National Insurance and employer-specific overtime are not included. No cloud sync yet.</p>
+</main>
+
+<script>
+(function(){
+const KEY="shiftmate_uk_shifts_v1";
+let shifts=[];
+const $=id=>document.getElementById(id);
+const money=n=>new Intl.NumberFormat("en-GB",{style:"currency",currency:"GBP"}).format(n);
+const escapeHTML=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+function today(){
+ const d=new Date();
+ return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+function duration(s){
+ let diff=s.endMins-s.startMins;
+ if(diff<=0)diff+=1440;
+ return Math.max(0,(diff-s.breakMins)/60);
+}
+function earnings(s){return duration(s)*s.rate;}
+
+function save(){
+ try{
+  localStorage.setItem(KEY,JSON.stringify(shifts));
+  $("storageStatus").textContent="✓ Saved on this device";
+  return true;
+ }catch(e){
+  $("storageStatus").textContent="Storage unavailable. Export a backup.";
+  return false;
+ }
+}
+function load(){
+ try{
+  const raw=localStorage.getItem(KEY);
+  shifts=raw?JSON.parse(raw):[];
+  if(!Array.isArray(shifts))throw Error();
+  $("storageStatus").textContent="✓ Device storage ready";
+ }catch(e){
+  shifts=[];
+  $("storageStatus").textContent="Could not access browser storage.";
+ }
+}
+function render(){
+ const d=new Date();
+ const month=d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");
+ const monthly=shifts.filter(s=>s.date.startsWith(month));
+ $("monthPay").textContent=money(monthly.reduce((a,s)=>a+earnings(s),0));
+ $("monthHours").textContent=monthly.reduce((a,s)=>a+duration(s),0).toFixed(1);
+ $("shiftCount").textContent=shifts.length;
+ $("allPay").textContent=money(shifts.reduce((a,s)=>a+earnings(s),0));
+ $("historyCount").textContent=shifts.length+" shifts";
+
+ const sorted=[...shifts].sort((a,b)=>b.date.localeCompare(a.date));
+ if(!sorted.length){
+  $("history").innerHTML='<div class="empty">No shifts saved yet. Add your first shift above.</div>';
+  return;
+ }
+ $("history").innerHTML=sorted.map(s=>{
+  const date=new Date(s.date+"T12:00:00").toLocaleDateString("en-GB",{weekday:"short",day:"numeric",month:"short",year:"numeric"});
+  return `<div class="shift row">
+   <div><b>${escapeHTML(s.job||"Shift")}</b>
+   <div class="muted">${date} · ${s.start}–${s.end}</div>
+   <div class="muted">${duration(s).toFixed(2)} hours · ${money(s.rate)}/hr · ${s.breakMins} min break</div>
+   <div class="muted">${escapeHTML(s.notes||"")}</div></div>
+   <div class="right">${money(earnings(s))}<br><button class="delete" data-id="${escapeHTML(s.id)}">Delete</button></div>
+  </div>`;
+ }).join("");
+}
+
+$("date").value=today();
+
+$("shiftForm").addEventListener("submit",e=>{
+ e.preventDefault();
+ const date=$("date").value;
+ const start=$("start").value;
+ const end=$("end").value;
+ const rate=Number($("rate").value);
+ const breakMins=Number($("breakMins").value);
+ if(!date||!start||!end||!Number.isFinite(rate)||rate<=0||!Number.isFinite(breakMins)||breakMins<0){
+  $("status").textContent="Please check the required fields.";
+  return;
+ }
+ const mins=t=>{const p=t.split(":");return Number(p[0])*60+Number(p[1]);};
+ const startMins=mins(start),endMins=mins(end);
+ let length=endMins-startMins;
+ if(length<=0)length+=1440;
+ if(breakMins>=length){
+  $("status").textContent="Break must be shorter than the shift.";
+  return;
+ }
+ shifts.push({
+  id:String(Date.now())+Math.random(),
+  date,start,end,startMins,endMins,rate,breakMins,
+  job:$("job").value.trim(),
+  notes:$("notes").value.trim()
+ });
+ if(save()){
+  $("status").textContent="Shift saved successfully!";
+  $("notes").value="";
+  render();
+ }
+});
+
+$("history").addEventListener("click",e=>{
+ const btn=e.target.closest("[data-id]");
+ if(!btn)return;
+ if(!confirm("Delete this shift?"))return;
+ shifts=shifts.filter(s=>s.id!==btn.dataset.id);
+ save();render();
+ $("status").textContent="Shift deleted.";
+});
+
+$("exportBtn").addEventListener("click",()=>{
+ const blob=new Blob([JSON.stringify({app:"ShiftMate UK",shifts},null,2)],{type:"application/json"});
+ const url=URL.createObjectURL(blob);
+ const a=document.createElement("a");
+ a.href=url;a.download="shiftmate-backup.json";a.click();
+ setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+
+$("importBtn").addEventListener("click",()=>$("importFile").click());
+$("importFile").addEventListener("change",e=>{
+ const file=e.target.files[0];
+ if(!file)return;
+ const reader=new FileReader();
+ reader.onload=()=>{
+  try{
+   const data=JSON.parse(reader.result);
+   if(!Array.isArray(data.shifts))throw Error("Invalid backup file");
+   if(!confirm("Import "+data.shifts.length+" shifts? This replaces current shifts."))return;
+   shifts=data.shifts;
+   if(save()){render();$("status").textContent="Backup imported.";}
+  }catch(err){alert(err.message||"Could not import backup.");}
+ };
+ reader.readAsText(file);
+ e.target.value="";
+});
+
+load();
+render();
+})();
+</script>
+</body>
+</html>
